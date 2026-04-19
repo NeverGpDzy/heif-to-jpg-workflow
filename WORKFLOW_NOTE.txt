@@ -1,0 +1,21 @@
+Photo Workflow Rules For This Folder
+
+When working in D:\Code\HEIF-to-JPG:
+
+1. Read README.md first.
+2. If the user says "execute the script", "run the script", or asks to process a new batch, use the interactive workflow first:
+   npm run workflow:photos
+3. Before running, confirm or collect:
+   - JPEG quality
+   - output suffix
+   - input folder, default input
+   - output folder, default output
+   - OSS folder/prefix
+   - whether GPS metadata should be removed
+   - whether to upload immediately
+   - public domain for returned links
+4. Prefer quality 85 for websites unless the user explicitly wants higher quality.
+5. Source HEIC/HEIF photos belong in input/. Processed JPG files belong in output/.
+6. If upload is requested, use OSS environment variables rather than writing secrets to files.
+7. After upload, return the final public URLs if a public domain is available.
+8. If the user wants public website images, remind them that keeping GPS metadata may expose location information.
