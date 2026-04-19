@@ -1,5 +1,7 @@
 # HEIF to JPG Workflow
 
+[简体中文](./README.zh-CN.md)
+
 Batch convert HEIC/HEIF photos to JPEG, preserve EXIF metadata, optionally remove GPS metadata, and optionally upload the generated files to Aliyun OSS.
 
 This project is designed for local photo batches:
