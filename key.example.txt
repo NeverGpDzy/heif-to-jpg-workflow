@@ -1,0 +1,9 @@
+# Copy this file to key.txt and fill in local values.
+# key.txt is ignored by Git.
+
+accessKeyId your-access-key-id
+accessKeySecret your-access-key-secret
+bucket your-bucket
+region oss-cn-hangzhou
+publicDomain cdn.example.com
+prefix photos

@@ -1,109 +1,152 @@
 # HEIF to JPG Workflow
 
-This folder contains a repeatable HEIC/HEIF photo workflow:
+Batch convert HEIC/HEIF photos to JPEG, preserve EXIF metadata, optionally remove GPS metadata, and optionally upload the generated files to Aliyun OSS.
 
-- convert photos to JPG
-- keep EXIF metadata
-- optionally remove GPS metadata
-- rename files with a custom suffix
-- optionally upload to Aliyun OSS
-- optionally print public URLs using a custom domain
-- read source photos from `input/`
-- write processed photos to `output/`
+This project is designed for local photo batches:
 
-## Main Commands
+- read source `.heic` / `.heif` files from `input/`
+- write processed `.jpg` files to `output/`
+- keep EXIF metadata by default
+- normalize common rotation metadata after conversion
+- optionally strip GPS metadata before publishing
+- optionally upload converted files to Aliyun OSS
+- print public URLs when an OSS public domain is configured
+
+## Requirements
+
+- Node.js 18 or newer
+- npm
+- Windows, macOS, or Linux supported by the bundled `exiftool-vendored` package
+
+## Installation
+
+```bash
+npm install
+```
+
+Put source photos in `input/`. The `.gitkeep` file keeps the folder in Git; actual photo files are ignored.
+
+## Quick Start
 
 Run the interactive workflow:
 
-```powershell
+```bash
 npm run workflow:photos
 ```
 
 Run a dry run without writing files:
 
-```powershell
+```bash
 npm run dry-run:photos
 ```
 
-Run the non-interactive processor directly:
+Run the processor directly:
 
-```powershell
-node scripts/process-photos.js --quality=90 --suffix=FriendsMeet --input-dir=input --output-dir=output --strip-gps
+```bash
+node scripts/process-photos.js --quality=90 --suffix=converted --input-dir=input --output-dir=output --strip-gps
 ```
 
 Upload existing JPG files from `output/` only:
 
-```powershell
+```bash
 npm run upload:photos
 ```
 
-## Questions Asked by the Interactive Workflow
+## Interactive Workflow
 
 `npm run workflow:photos` asks for:
 
 - config source or config file path, default `key.txt`
-- JPEG quality
-- output filename suffix
-- OSS folder/prefix
-- local input folder
-- local output folder
-- whether GPS metadata should be removed
+- JPEG quality, default `90`
+- output filename suffix, default `converted`
+- OSS folder/prefix, default `photos`
+- local input folder, default `input`
+- local output folder, default `output`
+- whether GPS metadata should be removed, default `yes`
 - whether files should be uploaded immediately
 - public domain used to print final URLs
 
-## OSS Environment Variables
+If `key.txt` is missing, the workflow continues with environment variables and local defaults.
 
-Set these before uploading, or put them in a local `key.txt` file:
+## Configuration
 
-```powershell
-$env:OSS_ACCESS_KEY_ID="your-access-key-id"
-$env:OSS_ACCESS_KEY_SECRET="your-access-key-secret"
-$env:OSS_BUCKET="your-bucket"
-$env:OSS_REGION="oss-cn-hangzhou"
+Uploading is optional. If OSS credentials are not available, conversion still runs and upload is skipped.
+
+You can configure OSS through environment variables:
+
+```bash
+OSS_ACCESS_KEY_ID=your-access-key-id
+OSS_ACCESS_KEY_SECRET=your-access-key-secret
+OSS_BUCKET=your-bucket
+OSS_REGION=oss-cn-hangzhou
 ```
 
-Optional:
+Optional variables:
 
-```powershell
-$env:OSS_PREFIX="FriendsMeet"
-$env:OSS_PUBLIC_DOMAIN="picture.example.com"
-$env:OSS_ENDPOINT="https://your-custom-endpoint"
-$env:OSS_STS_TOKEN="your-sts-token"
+```bash
+OSS_PREFIX=photos
+OSS_PUBLIC_DOMAIN=cdn.example.com
+OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
+OSS_STS_TOKEN=your-sts-token
 ```
 
-If `OSS_PUBLIC_DOMAIN` is set, the script prints public URLs after upload.
-
-`key.txt` supports either `name value` or `NAME=value` format. Example:
+You can also create a local `key.txt` file. It is ignored by Git.
 
 ```text
 accessKeyId your-access-key-id
 accessKeySecret your-access-key-secret
 bucket your-bucket
-region oss-cn-chengdu
-publicDomain picture.nevergpdzy.cn
-prefix FriendsMeet
+region oss-cn-hangzhou
+publicDomain cdn.example.com
+prefix photos
 ```
 
-The default public domain is bound to bucket `nevergpdzy-picture` in region `oss-cn-chengdu`, so local `key.txt` may contain only `accessKeyId` and `accessKeySecret` for the common path.
+`key.txt` supports either `name value`, `NAME=value`, or `name: value` lines. See [key.example.txt](./key.example.txt) for a template.
 
-If `bucket` or `region` is omitted but `publicDomain` points to an Aliyun OSS CNAME such as `picture.nevergpdzy.cn`, the uploader will try to resolve the bound bucket and region automatically.
+If `bucket` or `region` is omitted but `publicDomain` points to an Aliyun OSS CNAME, the uploader tries to resolve the bound bucket and region automatically.
 
 ## Defaults
 
-- output folder: `output`
 - input folder: `input`
-- default suffix: `FriendsMeet`
+- output folder: `output`
 - default config source in interactive mode: `key.txt`
-- default quality in interactive mode: `90`
-- default public domain in interactive mode: `picture.nevergpdzy.cn`
-- default OSS bucket for `picture.nevergpdzy.cn`: `nevergpdzy-picture`
-- default OSS region for `picture.nevergpdzy.cn`: `oss-cn-chengdu`
+- default JPEG quality: `90`
+- default suffix: `converted`
+- default OSS prefix: `photos`
 - GPS removal default in interactive mode: `yes`
 
-## Notes
+## Output Names
 
-- HEIC is usually more space-efficient than JPEG, so JPG files may be larger than the originals.
-- The current converter preserves EXIF and normalizes rotated images when needed.
-- Put source `.HEIC/.HEIF` files in `input/`.
-- Processed `.jpg` files are written to `output/`.
-- Source files are not modified.
+Files named like `IMG_1234.HEIC` become:
+
+```text
+IMG_1234_converted.jpg
+```
+
+Other filenames are sanitized and get the configured suffix.
+
+## Privacy Notes
+
+EXIF metadata can contain sensitive details such as device model, timestamps, and GPS coordinates. Use `--strip-gps` or answer `yes` to the interactive GPS removal prompt before publishing public website images.
+
+## Development
+
+Run syntax checks:
+
+```bash
+npm test
+```
+
+Run a dry run:
+
+```bash
+npm run dry-run:photos
+```
+
+## Release Versioning
+
+This project uses Semantic Versioning. See [VERSIONING.md](./VERSIONING.md).
+
+## License
+
+ISC. See [LICENSE](./LICENSE).

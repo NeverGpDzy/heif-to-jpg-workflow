@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a reproducible problem.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include commands and minimal input details. Do not attach private photos unless you have removed sensitive metadata.
+      placeholder: |
+        1. Run ...
+        2. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 1.2.0
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: "20.11.1"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Remove credentials and private URLs before pasting logs.
+      render: text

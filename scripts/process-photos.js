@@ -12,13 +12,10 @@ const { exiftoolPath } = require("exiftool-vendored");
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_SUFFIX = "FriendsMeet";
+const DEFAULT_SUFFIX = "converted";
 const DEFAULT_INPUT_DIR = "input";
 const DEFAULT_OUTPUT_DIR = "output";
 const DEFAULT_QUALITY = 90;
-const DEFAULT_PUBLIC_DOMAIN = "picture.nevergpdzy.cn";
-const DEFAULT_OSS_BUCKET = "nevergpdzy-picture";
-const DEFAULT_OSS_REGION = "oss-cn-chengdu";
 const INPUT_EXTENSIONS = new Set([".heic", ".heif"]);
 const RIGHT_ANGLE_ORIENTATIONS = new Set([5, 6, 7, 8]);
 
@@ -139,10 +136,6 @@ function extractHostName(value) {
   }
 
   return trimmed.replace(/^\/+|\/+$/g, "").split("/")[0];
-}
-
-function isDefaultPublicDomain(publicDomain) {
-  return extractHostName(publicDomain).toLowerCase() === DEFAULT_PUBLIC_DOMAIN;
 }
 
 function parseOssBindingHost(hostName) {
@@ -313,24 +306,17 @@ async function getUploadConfig() {
     OSS_REGION,
     OSS_ENDPOINT,
     OSS_PREFIX,
-    OSS_PUBLIC_DOMAIN = DEFAULT_PUBLIC_DOMAIN,
+    OSS_PUBLIC_DOMAIN,
     OSS_STS_TOKEN,
   } = process.env;
 
   const normalizedRegion = normalizeRegion(OSS_REGION);
-  const defaultBinding = isDefaultPublicDomain(OSS_PUBLIC_DOMAIN)
-    ? {
-        bucket: DEFAULT_OSS_BUCKET,
-        region: DEFAULT_OSS_REGION,
-        sourceHost: DEFAULT_PUBLIC_DOMAIN,
-      }
-    : {};
   const inferredBinding =
-    (!OSS_BUCKET || (!normalizedRegion && !OSS_ENDPOINT)) && OSS_PUBLIC_DOMAIN && !defaultBinding.bucket
+    (!OSS_BUCKET || (!normalizedRegion && !OSS_ENDPOINT)) && OSS_PUBLIC_DOMAIN
       ? await inferOssBindingFromPublicDomain(OSS_PUBLIC_DOMAIN)
       : {};
-  const resolvedBucket = OSS_BUCKET || defaultBinding.bucket || inferredBinding.bucket;
-  const resolvedRegion = OSS_ENDPOINT ? undefined : normalizedRegion || defaultBinding.region || inferredBinding.region;
+  const resolvedBucket = OSS_BUCKET || inferredBinding.bucket;
+  const resolvedRegion = OSS_ENDPOINT ? undefined : normalizedRegion || inferredBinding.region;
   const missing = [];
   if (!OSS_ACCESS_KEY_ID) missing.push("OSS_ACCESS_KEY_ID");
   if (!OSS_ACCESS_KEY_SECRET) missing.push("OSS_ACCESS_KEY_SECRET");
@@ -351,7 +337,7 @@ async function getUploadConfig() {
     publicDomain: OSS_PUBLIC_DOMAIN || undefined,
     region: resolvedRegion,
     stsToken: OSS_STS_TOKEN || undefined,
-    inferredFromDomain: !OSS_BUCKET || !normalizedRegion ? defaultBinding.sourceHost || inferredBinding.sourceHost : undefined,
+    inferredFromDomain: !OSS_BUCKET || !normalizedRegion ? inferredBinding.sourceHost : undefined,
   };
 }
 

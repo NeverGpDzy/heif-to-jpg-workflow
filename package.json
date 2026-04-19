@@ -1,18 +1,39 @@
 {
-  "name": "heif-to-jpg",
-  "version": "1.1.0",
-  "description": "Convert HEIC photos to JPG, preserve EXIF metadata, and optionally upload to Aliyun OSS.",
+  "name": "heif-to-jpg-workflow",
+  "version": "1.2.0",
+  "description": "Batch convert HEIC/HEIF photos to JPEG, preserve EXIF, strip GPS, and optionally upload to Aliyun OSS.",
   "main": "scripts/process-photos.js",
   "scripts": {
+    "check": "node --check scripts/process-photos.js && node --check scripts/run-workflow.js",
     "dry-run:photos": "node scripts/process-photos.js --dry-run",
     "process:photos": "node scripts/process-photos.js",
     "workflow:photos": "node scripts/run-workflow.js",
     "upload:photos": "node scripts/process-photos.js --upload-only",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run check"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "heic",
+    "heif",
+    "jpeg",
+    "jpg",
+    "exif",
+    "oss",
+    "aliyun",
+    "photo-workflow"
+  ],
+  "author": "NeverGpDzy",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NeverGpDzy/heif-to-jpg-workflow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NeverGpDzy/heif-to-jpg-workflow/issues"
+  },
+  "homepage": "https://github.com/NeverGpDzy/heif-to-jpg-workflow#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "ali-oss": "^6.23.0",
     "exiftool-vendored": "^35.18.0",

@@ -8,13 +8,10 @@ const { spawn } = require("node:child_process");
 
 const DEFAULT_CONFIG_SOURCE = "key.txt";
 const DEFAULT_QUALITY = "90";
-const DEFAULT_SUFFIX = "FriendsMeet";
-const DEFAULT_PREFIX = "FriendsMeet";
+const DEFAULT_SUFFIX = "converted";
+const DEFAULT_PREFIX = "photos";
 const DEFAULT_INPUT_DIR = "input";
 const DEFAULT_OUTPUT_DIR = "output";
-const DEFAULT_PUBLIC_DOMAIN = "picture.nevergpdzy.cn";
-const DEFAULT_OSS_BUCKET = "nevergpdzy-picture";
-const DEFAULT_OSS_REGION = "oss-cn-chengdu";
 
 function createPrompt() {
   return readline.createInterface({
@@ -38,35 +35,9 @@ function sanitizeValue(value) {
     .replace(/^_+|_+$/g, "");
 }
 
-function normalizeDomain(value) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  try {
-    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    return new URL(withProtocol).hostname.toLowerCase();
-  } catch (error) {
-    return trimmed.toLowerCase().replace(/^\/+|\/+$/g, "").split("/")[0];
-  }
-}
-
-function applyDefaultBinding(sourceEnv) {
-  const resolvedEnv = { ...sourceEnv };
-  const publicDomain = resolvedEnv.OSS_PUBLIC_DOMAIN || DEFAULT_PUBLIC_DOMAIN;
-
-  if (normalizeDomain(publicDomain) === DEFAULT_PUBLIC_DOMAIN) {
-    resolvedEnv.OSS_PUBLIC_DOMAIN = publicDomain;
-    resolvedEnv.OSS_BUCKET = resolvedEnv.OSS_BUCKET || DEFAULT_OSS_BUCKET;
-    resolvedEnv.OSS_REGION = resolvedEnv.OSS_REGION || DEFAULT_OSS_REGION;
-  }
-
-  return resolvedEnv;
-}
-
 async function askWithDefault(rl, label, fallback) {
-  const answer = await rl.question(`${label} [${fallback}]: `);
+  const displayValue = fallback || "blank";
+  const answer = await rl.question(`${label} [${displayValue}]: `);
   return answer.trim() || fallback;
 }
 
@@ -126,9 +97,23 @@ function parseConfigLine(line) {
   return [envKey, match[2].trim()];
 }
 
-async function loadConfigFile(configPath) {
+async function loadConfigFile(configPath, options = {}) {
   const resolvedPath = path.resolve(process.cwd(), configPath);
-  const content = await fs.readFile(resolvedPath, "utf8");
+  let content;
+
+  try {
+    content = await fs.readFile(resolvedPath, "utf8");
+  } catch (error) {
+    if (options.optional && error && error.code === "ENOENT") {
+      return {
+        env: {},
+        label: `${configPath} (not found)`,
+      };
+    }
+
+    throw error;
+  }
+
   const fileEnv = {};
 
   for (const line of content.split(/\r?\n/)) {
@@ -152,7 +137,7 @@ async function resolveConfigSource(selection) {
   const normalized = trimmed.toLowerCase();
 
   if (!trimmed || normalized === "default" || normalized === DEFAULT_CONFIG_SOURCE.toLowerCase()) {
-    return loadConfigFile(DEFAULT_CONFIG_SOURCE);
+    return loadConfigFile(DEFAULT_CONFIG_SOURCE, { optional: true });
   }
 
   if (["env", "environment"].includes(normalized)) {
@@ -207,7 +192,7 @@ async function main() {
       DEFAULT_CONFIG_SOURCE
     );
     const config = await resolveConfigSource(configSource);
-    const resolvedEnv = applyDefaultBinding({ ...env, ...config.env });
+    const resolvedEnv = { ...env, ...config.env };
 
     const qualityText = await askWithDefault(rl, "JPEG quality (recommended 82-90)", DEFAULT_QUALITY);
     const suffix = sanitizeValue(await askWithDefault(rl, "Filename suffix", DEFAULT_SUFFIX));
@@ -221,7 +206,7 @@ async function main() {
       ? (await askWithDefault(
           rl,
           "Public domain for returned links (blank to skip)",
-          resolvedEnv.OSS_PUBLIC_DOMAIN || DEFAULT_PUBLIC_DOMAIN
+          resolvedEnv.OSS_PUBLIC_DOMAIN || ""
         )).trim()
       : "";
 

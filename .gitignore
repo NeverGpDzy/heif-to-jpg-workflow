@@ -10,6 +10,8 @@ node_modules/
 *.pem
 *.key
 key.txt
+key.*.txt
+!key.example.txt
 1776588725965.txt
 
 # Photo batches
