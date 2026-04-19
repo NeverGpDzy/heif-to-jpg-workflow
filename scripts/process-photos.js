@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const dns = require("node:dns/promises");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
@@ -15,6 +16,9 @@ const DEFAULT_SUFFIX = "FriendsMeet";
 const DEFAULT_INPUT_DIR = "input";
 const DEFAULT_OUTPUT_DIR = "output";
 const DEFAULT_QUALITY = 90;
+const DEFAULT_PUBLIC_DOMAIN = "picture.nevergpdzy.cn";
+const DEFAULT_OSS_BUCKET = "nevergpdzy-picture";
+const DEFAULT_OSS_REGION = "oss-cn-chengdu";
 const INPUT_EXTENSIONS = new Set([".heic", ".heif"]);
 const RIGHT_ANGLE_ORIENTATIONS = new Set([5, 6, 7, 8]);
 
@@ -101,6 +105,81 @@ function formatOutputName(inputFileName, suffix) {
 
 function normalizePrefix(prefix) {
   return (prefix || "").trim().replace(/^\/+|\/+$/g, "");
+}
+
+function normalizeRegion(region) {
+  const trimmed = String(region || "").trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^oss-/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/^cn-/i.test(trimmed)) {
+    return `oss-${trimmed}`;
+  }
+
+  return trimmed;
+}
+
+function extractHostName(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      return new URL(trimmed).hostname;
+    } catch (error) {
+      return "";
+    }
+  }
+
+  return trimmed.replace(/^\/+|\/+$/g, "").split("/")[0];
+}
+
+function isDefaultPublicDomain(publicDomain) {
+  return extractHostName(publicDomain).toLowerCase() === DEFAULT_PUBLIC_DOMAIN;
+}
+
+function parseOssBindingHost(hostName) {
+  const match = /^([^.]+)\.(oss-[^.]+)\.aliyuncs\.com\.?$/i.exec(String(hostName || "").trim());
+  if (!match) {
+    return null;
+  }
+
+  return {
+    bucket: match[1],
+    region: match[2],
+  };
+}
+
+async function inferOssBindingFromPublicDomain(publicDomain) {
+  const hostName = extractHostName(publicDomain);
+  if (!hostName) {
+    return {};
+  }
+
+  try {
+    const records = await dns.resolveCname(hostName);
+
+    for (const record of records) {
+      const binding = parseOssBindingHost(record);
+      if (binding) {
+        return {
+          ...binding,
+          sourceHost: hostName,
+        };
+      }
+    }
+  } catch (error) {
+    return {};
+  }
+
+  return {};
 }
 
 async function listInputFiles(rootDir) {
@@ -226,7 +305,7 @@ async function convertFile(sourcePath, outputPath, quality) {
   await fs.writeFile(outputPath, outputBuffer);
 }
 
-function getUploadConfig() {
+async function getUploadConfig() {
   const {
     OSS_ACCESS_KEY_ID,
     OSS_ACCESS_KEY_SECRET,
@@ -234,15 +313,29 @@ function getUploadConfig() {
     OSS_REGION,
     OSS_ENDPOINT,
     OSS_PREFIX,
-    OSS_PUBLIC_DOMAIN,
+    OSS_PUBLIC_DOMAIN = DEFAULT_PUBLIC_DOMAIN,
     OSS_STS_TOKEN,
   } = process.env;
 
+  const normalizedRegion = normalizeRegion(OSS_REGION);
+  const defaultBinding = isDefaultPublicDomain(OSS_PUBLIC_DOMAIN)
+    ? {
+        bucket: DEFAULT_OSS_BUCKET,
+        region: DEFAULT_OSS_REGION,
+        sourceHost: DEFAULT_PUBLIC_DOMAIN,
+      }
+    : {};
+  const inferredBinding =
+    (!OSS_BUCKET || (!normalizedRegion && !OSS_ENDPOINT)) && OSS_PUBLIC_DOMAIN && !defaultBinding.bucket
+      ? await inferOssBindingFromPublicDomain(OSS_PUBLIC_DOMAIN)
+      : {};
+  const resolvedBucket = OSS_BUCKET || defaultBinding.bucket || inferredBinding.bucket;
+  const resolvedRegion = OSS_ENDPOINT ? undefined : normalizedRegion || defaultBinding.region || inferredBinding.region;
   const missing = [];
   if (!OSS_ACCESS_KEY_ID) missing.push("OSS_ACCESS_KEY_ID");
   if (!OSS_ACCESS_KEY_SECRET) missing.push("OSS_ACCESS_KEY_SECRET");
-  if (!OSS_BUCKET) missing.push("OSS_BUCKET");
-  if (!OSS_REGION && !OSS_ENDPOINT) missing.push("OSS_REGION or OSS_ENDPOINT");
+  if (!resolvedBucket) missing.push("OSS_BUCKET");
+  if (!resolvedRegion && !OSS_ENDPOINT) missing.push("OSS_REGION or OSS_ENDPOINT");
 
   if (missing.length > 0) {
     return { enabled: false, missing };
@@ -251,13 +344,14 @@ function getUploadConfig() {
   return {
     accessKeyId: OSS_ACCESS_KEY_ID,
     accessKeySecret: OSS_ACCESS_KEY_SECRET,
-    bucket: OSS_BUCKET,
+    bucket: resolvedBucket,
     enabled: true,
     endpoint: OSS_ENDPOINT || undefined,
     prefix: normalizePrefix(OSS_PREFIX),
     publicDomain: OSS_PUBLIC_DOMAIN || undefined,
-    region: OSS_REGION || undefined,
+    region: resolvedRegion,
     stsToken: OSS_STS_TOKEN || undefined,
+    inferredFromDomain: !OSS_BUCKET || !normalizedRegion ? defaultBinding.sourceHost || inferredBinding.sourceHost : undefined,
   };
 }
 
@@ -393,10 +487,16 @@ async function main() {
     }
   }
 
-  const uploadConfig = getUploadConfig();
+  const uploadConfig = await getUploadConfig();
   if (!uploadConfig.enabled) {
     console.log(`OSS upload skipped. Missing: ${uploadConfig.missing.join(", ")}`);
     return;
+  }
+
+  if (uploadConfig.inferredFromDomain) {
+    console.log(
+      `resolved OSS binding from ${uploadConfig.inferredFromDomain}: bucket=${uploadConfig.bucket}, region=${uploadConfig.region}`
+    );
   }
 
   await uploadFiles(

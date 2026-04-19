@@ -28,7 +28,7 @@ npm run dry-run:photos
 Run the non-interactive processor directly:
 
 ```powershell
-node scripts/process-photos.js --quality=85 --suffix=FriendsMeet --input-dir=input --output-dir=output --strip-gps
+node scripts/process-photos.js --quality=90 --suffix=FriendsMeet --input-dir=input --output-dir=output --strip-gps
 ```
 
 Upload existing JPG files from `output/` only:
@@ -41,6 +41,7 @@ npm run upload:photos
 
 `npm run workflow:photos` asks for:
 
+- config source or config file path, default `key.txt`
 - JPEG quality
 - output filename suffix
 - OSS folder/prefix
@@ -52,7 +53,7 @@ npm run upload:photos
 
 ## OSS Environment Variables
 
-Set these before uploading:
+Set these before uploading, or put them in a local `key.txt` file:
 
 ```powershell
 $env:OSS_ACCESS_KEY_ID="your-access-key-id"
@@ -72,12 +73,31 @@ $env:OSS_STS_TOKEN="your-sts-token"
 
 If `OSS_PUBLIC_DOMAIN` is set, the script prints public URLs after upload.
 
+`key.txt` supports either `name value` or `NAME=value` format. Example:
+
+```text
+accessKeyId your-access-key-id
+accessKeySecret your-access-key-secret
+bucket your-bucket
+region oss-cn-chengdu
+publicDomain picture.nevergpdzy.cn
+prefix FriendsMeet
+```
+
+The default public domain is bound to bucket `nevergpdzy-picture` in region `oss-cn-chengdu`, so local `key.txt` may contain only `accessKeyId` and `accessKeySecret` for the common path.
+
+If `bucket` or `region` is omitted but `publicDomain` points to an Aliyun OSS CNAME such as `picture.nevergpdzy.cn`, the uploader will try to resolve the bound bucket and region automatically.
+
 ## Defaults
 
 - output folder: `output`
 - input folder: `input`
 - default suffix: `FriendsMeet`
-- default quality in interactive mode: `85`
+- default config source in interactive mode: `key.txt`
+- default quality in interactive mode: `90`
+- default public domain in interactive mode: `picture.nevergpdzy.cn`
+- default OSS bucket for `picture.nevergpdzy.cn`: `nevergpdzy-picture`
+- default OSS region for `picture.nevergpdzy.cn`: `oss-cn-chengdu`
 - GPS removal default in interactive mode: `yes`
 
 ## Notes

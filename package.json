@@ -1,6 +1,6 @@
 {
   "name": "heif-to-jpg",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Convert HEIC photos to JPG, preserve EXIF metadata, and optionally upload to Aliyun OSS.",
   "main": "scripts/process-photos.js",
   "scripts": {
