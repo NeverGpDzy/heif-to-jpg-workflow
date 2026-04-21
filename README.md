@@ -2,17 +2,19 @@
 
 [简体中文](./README.zh-CN.md)
 
-Batch convert HEIC/HEIF photos to JPEG, preserve EXIF metadata, optionally remove GPS metadata, and optionally upload the generated files to Aliyun OSS.
+Batch convert HEIC/HEIF photos to JPEG, include existing JPG/JPEG photos in the same batch, preserve EXIF metadata, optionally remove GPS metadata, and optionally upload the generated files to Aliyun OSS.
 
 This project is designed for local photo batches:
 
-- read source `.heic` / `.heif` files from `input/`
+- read source `.heic` / `.heif` / `.jpg` / `.jpeg` files from `input/`
 - write processed `.jpg` files to `output/`
+- copy existing JPG/JPEG inputs without re-encoding
 - keep EXIF metadata by default
 - normalize common rotation metadata after conversion
 - optionally strip GPS metadata before publishing
 - optionally upload converted files to Aliyun OSS
 - print public URLs when an OSS public domain is configured
+- write uploaded public URLs to a `.txt` file in `output/` when a public domain is configured
 
 ## Requirements
 
@@ -48,11 +50,19 @@ Run the processor directly:
 node scripts/process-photos.js --quality=90 --suffix=converted --input-dir=input --output-dir=output --strip-gps
 ```
 
+Process and upload a named travel batch:
+
+```bash
+node scripts/process-photos.js --quality=90 --suffix=Tianjin --input-dir=input --output-dir=output
+```
+
 Upload existing JPG files from `output/` only:
 
 ```bash
 npm run upload:photos
 ```
+
+When upload runs with `OSS_PUBLIC_DOMAIN` configured, the script also writes a public URL list file such as `output/Travel-Tianjin-public-urls.txt`.
 
 ## Interactive Workflow
 
@@ -67,6 +77,8 @@ npm run upload:photos
 - whether GPS metadata should be removed, default `yes`
 - whether files should be uploaded immediately
 - public domain used to print final URLs
+
+When upload is enabled and a public domain is available, the workflow also writes the uploaded public links to a `.txt` file in the output folder.
 
 If `key.txt` is missing, the workflow continues with environment variables and local defaults.
 
@@ -89,6 +101,7 @@ Optional variables:
 OSS_PREFIX=photos
 OSS_PUBLIC_DOMAIN=cdn.example.com
 OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
+OSS_DNS_SERVER=223.5.5.5
 OSS_STS_TOKEN=your-sts-token
 ```
 
@@ -125,7 +138,13 @@ Files named like `IMG_1234.HEIC` become:
 IMG_1234_converted.jpg
 ```
 
-Other filenames are sanitized and get the configured suffix.
+Existing JPEG inputs use the same naming rule, so `IMG_1878.JPEG` with suffix `Tianjin` becomes:
+
+```text
+IMG_1878_Tianjin.jpg
+```
+
+Other filenames are sanitized and get the configured suffix. If multiple inputs would create the same output name, the workflow stops before writing files.
 
 ## Privacy Notes
 

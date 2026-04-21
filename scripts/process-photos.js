@@ -2,6 +2,7 @@
 
 const dns = require("node:dns/promises");
 const fs = require("node:fs/promises");
+const net = require("node:net");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
@@ -9,6 +10,7 @@ const { promisify } = require("node:util");
 const OSS = require("ali-oss");
 const convert = require("heic-convert");
 const { exiftoolPath } = require("exiftool-vendored");
+const urllib = require("urllib");
 
 const execFileAsync = promisify(execFile);
 
@@ -16,7 +18,9 @@ const DEFAULT_SUFFIX = "converted";
 const DEFAULT_INPUT_DIR = "input";
 const DEFAULT_OUTPUT_DIR = "output";
 const DEFAULT_QUALITY = 90;
-const INPUT_EXTENSIONS = new Set([".heic", ".heif"]);
+const CONVERTIBLE_EXTENSIONS = new Set([".heic", ".heif"]);
+const PASSTHROUGH_EXTENSIONS = new Set([".jpg", ".jpeg"]);
+const INPUT_EXTENSIONS = new Set([...CONVERTIBLE_EXTENSIONS, ...PASSTHROUGH_EXTENSIONS]);
 const RIGHT_ANGLE_ORIENTATIONS = new Set([5, 6, 7, 8]);
 
 function parseArgs(argv) {
@@ -100,6 +104,19 @@ function formatOutputName(inputFileName, suffix) {
   return `${stem}_${suffix}.jpg`;
 }
 
+function getInputKind(fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  if (CONVERTIBLE_EXTENSIONS.has(ext)) {
+    return "convert";
+  }
+
+  if (PASSTHROUGH_EXTENSIONS.has(ext)) {
+    return "copy";
+  }
+
+  return null;
+}
+
 function normalizePrefix(prefix) {
   return (prefix || "").trim().replace(/^\/+|\/+$/g, "");
 }
@@ -119,6 +136,72 @@ function normalizeRegion(region) {
   }
 
   return trimmed;
+}
+
+function parseDnsServers(value) {
+  return String(value || "")
+    .split(/[,\s]+/)
+    .map((server) => server.trim())
+    .filter(Boolean);
+}
+
+function createDnsLookup(dnsServers) {
+  const servers = parseDnsServers(dnsServers);
+  if (servers.length === 0) {
+    return null;
+  }
+
+  const resolver = new dns.Resolver();
+  resolver.setServers(servers);
+
+  return (hostName, options, callback) => {
+    const hostFamily = net.isIP(hostName);
+    if (hostFamily) {
+      if (options && options.all) {
+        callback(null, [{ address: hostName, family: hostFamily }]);
+        return;
+      }
+
+      callback(null, hostName, hostFamily);
+      return;
+    }
+
+    const family = Number(options && options.family) || 0;
+    const resolve = async () => {
+      if (family === 6) {
+        const addresses = await resolver.resolve6(hostName);
+        return addresses.map((address) => ({ address, family: 6 }));
+      }
+
+      if (family === 4) {
+        const addresses = await resolver.resolve4(hostName);
+        return addresses.map((address) => ({ address, family: 4 }));
+      }
+
+      try {
+        const addresses = await resolver.resolve4(hostName);
+        return addresses.map((address) => ({ address, family: 4 }));
+      } catch (error) {
+        const addresses = await resolver.resolve6(hostName);
+        return addresses.map((address) => ({ address, family: 6 }));
+      }
+    };
+
+    resolve()
+      .then((addresses) => {
+        if (!Array.isArray(addresses) || addresses.length === 0) {
+          throw new Error(`No DNS records found for ${hostName}`);
+        }
+
+        if (options && options.all) {
+          callback(null, addresses);
+          return;
+        }
+
+        callback(null, addresses[0].address, addresses[0].family);
+      })
+      .catch(callback);
+  };
 }
 
 function extractHostName(value) {
@@ -298,6 +381,10 @@ async function convertFile(sourcePath, outputPath, quality) {
   await fs.writeFile(outputPath, outputBuffer);
 }
 
+async function copyJpegFile(sourcePath, outputPath) {
+  await fs.copyFile(sourcePath, outputPath);
+}
+
 async function getUploadConfig() {
   const {
     OSS_ACCESS_KEY_ID,
@@ -307,6 +394,7 @@ async function getUploadConfig() {
     OSS_ENDPOINT,
     OSS_PREFIX,
     OSS_PUBLIC_DOMAIN,
+    OSS_DNS_SERVER,
     OSS_STS_TOKEN,
   } = process.env;
 
@@ -333,6 +421,7 @@ async function getUploadConfig() {
     bucket: resolvedBucket,
     enabled: true,
     endpoint: OSS_ENDPOINT || undefined,
+    dnsServer: OSS_DNS_SERVER || undefined,
     prefix: normalizePrefix(OSS_PREFIX),
     publicDomain: OSS_PUBLIC_DOMAIN || undefined,
     region: resolvedRegion,
@@ -355,6 +444,33 @@ function buildPublicUrl(publicDomain, objectKey) {
   return `${withProtocol.replace(/\/+$/g, "")}/${objectKey.replace(/^\/+/g, "")}`;
 }
 
+function sanitizeFileLabel(value, fallback = "photos") {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+function buildPublicUrlListPath(outputDir, config) {
+  const prefixLabel = sanitizeFileLabel(config.prefix || "", "root");
+  return path.join(outputDir, `${prefixLabel}-public-urls.txt`);
+}
+
+async function writePublicUrlList(outputDir, config, uploadedFiles) {
+  const publicUrls = uploadedFiles
+    .map((item) => item.publicUrl)
+    .filter(Boolean);
+
+  if (publicUrls.length === 0) {
+    return null;
+  }
+
+  const outputPath = buildPublicUrlListPath(outputDir, config);
+  await fs.writeFile(outputPath, `${publicUrls.join("\n")}\n`, "utf8");
+  return outputPath;
+}
+
 function createOssClient(config) {
   const options = {
     accessKeyId: config.accessKeyId,
@@ -362,6 +478,15 @@ function createOssClient(config) {
     bucket: config.bucket,
     secure: true,
   };
+
+  const lookup = createDnsLookup(config.dnsServer);
+  if (lookup) {
+    options.urllib = {
+      request(url, params = {}) {
+        return urllib.request(url, { ...params, lookup });
+      },
+    };
+  }
 
   if (config.endpoint) {
     options.endpoint = config.endpoint;
@@ -405,6 +530,45 @@ async function uploadFiles(config, outputDir, fileNames) {
   return uploaded;
 }
 
+function assertUniqueOutputNames(plan) {
+  const seen = new Map();
+  const collisions = [];
+
+  for (const item of plan) {
+    const key = item.fileName.toLowerCase();
+    const existing = seen.get(key);
+    if (existing) {
+      collisions.push(`${existing.sourceFileName} and ${item.sourceFileName} -> ${item.fileName}`);
+      continue;
+    }
+
+    seen.set(key, item);
+  }
+
+  if (collisions.length > 0) {
+    throw new Error(`Duplicate output names would be created:\n${collisions.join("\n")}`);
+  }
+}
+
+async function assertOutputTargetsAvailable(plan) {
+  const existing = [];
+
+  for (const item of plan) {
+    try {
+      await fs.access(item.outputPath);
+      existing.push(path.relative(process.cwd(), item.outputPath) || item.outputPath);
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  if (existing.length > 0) {
+    throw new Error(`Refusing to overwrite existing output file(s):\n${existing.join("\n")}`);
+  }
+}
+
 async function buildPlan(inputDir, outputDir, suffix, uploadOnly) {
   if (uploadOnly) {
     const outputFiles = await listOutputFiles(outputDir);
@@ -422,15 +586,22 @@ async function buildPlan(inputDir, outputDir, suffix, uploadOnly) {
 
   const inputFiles = await listInputFiles(inputDir);
   if (inputFiles.length === 0) {
-    throw new Error(`No .HEIC or .HEIF files were found in ${inputDir}.`);
+    throw new Error(`No .HEIC, .HEIF, .JPG, or .JPEG files were found in ${inputDir}.`);
   }
 
-  return inputFiles.map((fileName) => ({
-    fileName: formatOutputName(fileName, suffix),
-    outputPath: path.join(outputDir, formatOutputName(fileName, suffix)),
-    sourcePath: path.join(inputDir, fileName),
-    sourceFileName: fileName,
-  }));
+  const plan = inputFiles.map((fileName) => {
+    const outputName = formatOutputName(fileName, suffix);
+    return {
+      fileName: outputName,
+      inputKind: getInputKind(fileName),
+      outputPath: path.join(outputDir, outputName),
+      sourcePath: path.join(inputDir, fileName),
+      sourceFileName: fileName,
+    };
+  });
+
+  assertUniqueOutputNames(plan);
+  return plan;
 }
 
 async function main() {
@@ -454,21 +625,28 @@ async function main() {
   }
 
   if (!options.uploadOnly) {
+    await assertOutputTargetsAvailable(plan);
     await fs.mkdir(outputDir, { recursive: true });
 
     for (const item of plan) {
       const sourceMeta = await readMetadata(item.sourcePath);
+      let action = "created";
+      let orientationNormalized = false;
 
-      await convertFile(item.sourcePath, item.outputPath, options.quality);
-      await copyMetadata(item.sourcePath, item.outputPath);
-
-      const orientationNormalized = await maybeNormalizeOrientation(sourceMeta, item.outputPath);
+      if (item.inputKind === "copy") {
+        await copyJpegFile(item.sourcePath, item.outputPath);
+        action = "copied";
+      } else {
+        await convertFile(item.sourcePath, item.outputPath, options.quality);
+        await copyMetadata(item.sourcePath, item.outputPath);
+        orientationNormalized = await maybeNormalizeOrientation(sourceMeta, item.outputPath);
+      }
       if (options.stripGps) {
         await stripGpsMetadata(item.outputPath);
       }
       const outputMeta = await readMetadata(item.outputPath);
       console.log(
-        `created ${item.fileName} (${outputMeta.ImageWidth}x${outputMeta.ImageHeight}, orientation=${outputMeta.Orientation || 1}${orientationNormalized ? ", normalized" : ""})`
+        `${action} ${item.fileName} (${outputMeta.ImageWidth}x${outputMeta.ImageHeight}, orientation=${outputMeta.Orientation || 1}${orientationNormalized ? ", normalized" : ""})`
       );
     }
   }
@@ -485,11 +663,16 @@ async function main() {
     );
   }
 
-  await uploadFiles(
+  const uploadedFiles = await uploadFiles(
     uploadConfig,
     outputDir,
     plan.map((item) => item.fileName)
   );
+
+  const publicUrlListPath = await writePublicUrlList(outputDir, uploadConfig, uploadedFiles);
+  if (publicUrlListPath) {
+    console.log(`public url list written to ${publicUrlListPath}`);
+  }
 }
 
 main().catch((error) => {

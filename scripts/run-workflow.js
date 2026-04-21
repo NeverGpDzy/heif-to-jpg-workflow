@@ -183,7 +183,7 @@ async function main() {
   const rl = createPrompt();
 
   try {
-    console.log("This workflow will scan the current directory for HEIC/HEIF photos.");
+    console.log("This workflow will scan the current directory for HEIC/HEIF/JPG/JPEG photos.");
     console.log("Choose a config source first. Press Enter to load key.txt.");
 
     const configSource = await askWithDefault(
