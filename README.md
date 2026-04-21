@@ -8,9 +8,9 @@ This project is designed for local photo batches:
 
 - read source `.heic` / `.heif` / `.jpg` / `.jpeg` files from `input/`
 - write processed `.jpg` files to `output/`
-- copy existing JPG/JPEG inputs without re-encoding
+- copy existing JPG/JPEG inputs without re-encoding when they already use `Orientation=1`
 - keep EXIF metadata by default
-- normalize common rotation metadata after conversion
+- normalize HEIC/HEIF conversion rotation metadata and rewrite EXIF-oriented JPEGs so output files display correctly without browser auto-rotation
 - optionally strip GPS metadata before publishing
 - optionally upload converted files to Aliyun OSS
 - print public URLs when an OSS public domain is configured
@@ -71,6 +71,8 @@ node scripts/process-photos.js --replace-from=replace-urls.txt --quality=90 --su
 ```
 
 Replacement mode reads one URL per line, matches each URL filename against the current input batch after suffix formatting, regenerates the local JPG, and uploads it to the exact object key from the URL path. The whole batch fails before upload if any URL cannot be matched.
+
+When a source JPG/JPEG depends on EXIF orientation (`Orientation` other than `1`), the workflow re-encodes it with the selected JPEG quality, rotates the pixels into the correct display direction, and writes the output back with `Orientation=1`.
 
 ## Interactive Workflow
 

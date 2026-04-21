@@ -10,6 +10,7 @@ const { promisify } = require("node:util");
 const OSS = require("ali-oss");
 const convert = require("heic-convert");
 const { exiftoolPath } = require("exiftool-vendored");
+const sharp = require("sharp");
 const urllib = require("urllib");
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +23,15 @@ const CONVERTIBLE_EXTENSIONS = new Set([".heic", ".heif"]);
 const PASSTHROUGH_EXTENSIONS = new Set([".jpg", ".jpeg"]);
 const INPUT_EXTENSIONS = new Set([...CONVERTIBLE_EXTENSIONS, ...PASSTHROUGH_EXTENSIONS]);
 const RIGHT_ANGLE_ORIENTATIONS = new Set([5, 6, 7, 8]);
+
+function getOrientationValue(value) {
+  const orientation = Number(value);
+  if (!Number.isInteger(orientation) || orientation < 1 || orientation > 8) {
+    return 1;
+  }
+
+  return orientation;
+}
 
 function parseArgs(argv) {
   const options = {
@@ -395,7 +405,7 @@ async function stripGpsMetadata(outputPath) {
 }
 
 async function maybeNormalizeOrientation(sourceMeta, outputPath) {
-  const sourceOrientation = Number(sourceMeta.Orientation || 1);
+  const sourceOrientation = getOrientationValue(sourceMeta.Orientation);
   if (!RIGHT_ANGLE_ORIENTATIONS.has(sourceOrientation)) {
     return false;
   }
@@ -433,6 +443,28 @@ async function convertFile(sourcePath, outputPath, quality) {
 
 async function copyJpegFile(sourcePath, outputPath) {
   await fs.copyFile(sourcePath, outputPath);
+}
+
+async function normalizeJpegFile(sourcePath, outputPath, quality) {
+  await sharp(sourcePath)
+    .jpeg({
+      chromaSubsampling: "4:4:4",
+      quality,
+    })
+    .toFile(outputPath);
+}
+
+async function copyOrNormalizeJpegFile(sourcePath, outputPath, quality, sourceMeta) {
+  const sourceOrientation = getOrientationValue(sourceMeta.Orientation);
+  if (sourceOrientation === 1) {
+    await copyJpegFile(sourcePath, outputPath);
+    return false;
+  }
+
+  await normalizeJpegFile(sourcePath, outputPath, quality);
+  await copyMetadata(sourcePath, outputPath);
+  await setOrientation(outputPath, 1);
+  return true;
 }
 
 async function getUploadConfig() {
@@ -778,8 +810,13 @@ async function processPlanItem(item, options) {
   let orientationNormalized = false;
 
   if (item.inputKind === "copy") {
-    await copyJpegFile(item.sourcePath, item.outputPath);
-    action = "copied";
+    orientationNormalized = await copyOrNormalizeJpegFile(
+      item.sourcePath,
+      item.outputPath,
+      options.quality,
+      sourceMeta
+    );
+    action = orientationNormalized ? "normalized" : "copied";
   } else {
     await convertFile(item.sourcePath, item.outputPath, options.quality);
     await copyMetadata(item.sourcePath, item.outputPath);

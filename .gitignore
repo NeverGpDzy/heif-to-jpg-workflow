@@ -36,9 +36,10 @@ tmp/
 temp/
 
 # Local Codex temp work directories
-.codex-image-inspect/
-.codex-empty-input/
-.codex-photo-review/
+.codex-*/
+
+# Local operation notes
+处理记录.txt
 
 # OS and editor files
 .DS_Store
