@@ -64,6 +64,14 @@ npm run upload:photos
 
 When upload runs with `OSS_PUBLIC_DOMAIN` configured, the script also writes a public URL list file such as `output/Travel-Tianjin-public-urls.txt`.
 
+Replace already-published OSS images without changing their public URLs:
+
+```bash
+node scripts/process-photos.js --replace-from=replace-urls.txt --quality=90 --suffix=FriendsMeet --input-dir=input --output-dir=output
+```
+
+Replacement mode reads one URL per line, matches each URL filename against the current input batch after suffix formatting, regenerates the local JPG, and uploads it to the exact object key from the URL path. The whole batch fails before upload if any URL cannot be matched.
+
 ## Interactive Workflow
 
 `npm run workflow:photos` asks for:
@@ -79,6 +87,8 @@ When upload runs with `OSS_PUBLIC_DOMAIN` configured, the script also writes a p
 - public domain used to print final URLs
 
 When upload is enabled and a public domain is available, the workflow also writes the uploaded public links to a `.txt` file in the output folder.
+
+Exact replacement mode is CLI-only. Use `--replace-from=<file>` with a newline-delimited URL list when you need to overwrite existing OSS objects in place.
 
 If `key.txt` is missing, the workflow continues with environment variables and local defaults.
 

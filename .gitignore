@@ -13,6 +13,7 @@ key.txt
 key.*.txt
 !key.example.txt
 1776588725965.txt
+replace-urls*.txt
 
 # Photo batches
 input/*

@@ -29,6 +29,7 @@ function parseArgs(argv) {
     inputDir: DEFAULT_INPUT_DIR,
     outputDir: DEFAULT_OUTPUT_DIR,
     quality: DEFAULT_QUALITY,
+    replaceFrom: "",
     suffix: DEFAULT_SUFFIX,
     stripGps: false,
     uploadOnly: false,
@@ -52,6 +53,11 @@ function parseArgs(argv) {
 
     if (arg.startsWith("--quality=")) {
       options.quality = Number(arg.slice("--quality=".length));
+      continue;
+    }
+
+    if (arg.startsWith("--replace-from=")) {
+      options.replaceFrom = arg.slice("--replace-from=".length).trim();
       continue;
     }
 
@@ -79,6 +85,10 @@ function parseArgs(argv) {
 
   if (!options.suffix) {
     throw new Error("suffix cannot be empty");
+  }
+
+  if (options.replaceFrom && options.uploadOnly) {
+    throw new Error("--replace-from cannot be used with --upload-only");
   }
 
   return options;
@@ -221,6 +231,37 @@ function extractHostName(value) {
   return trimmed.replace(/^\/+|\/+$/g, "").split("/")[0];
 }
 
+function parseReplacementUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch (error) {
+    throw new Error(`Invalid replacement URL: ${value}`);
+  }
+
+  const objectKey = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+  const fileName = path.posix.basename(objectKey);
+  if (!objectKey || !fileName || fileName === objectKey && !path.posix.extname(fileName)) {
+    throw new Error(`Replacement URL does not contain an object file path: ${value}`);
+  }
+
+  return {
+    fileName,
+    objectKey,
+    publicUrl: `${url.protocol}//${url.host}/${objectKey}`,
+    url: value,
+  };
+}
+
+async function readReplacementUrls(filePath) {
+  const content = await fs.readFile(filePath, "utf8");
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(parseReplacementUrl);
+}
+
 function parseOssBindingHost(hostName) {
   const match = /^([^.]+)\.(oss-[^.]+)\.aliyuncs\.com\.?$/i.exec(String(hostName || "").trim());
   if (!match) {
@@ -263,6 +304,15 @@ async function listInputFiles(rootDir) {
   return entries
     .filter((entry) => entry.isFile() && INPUT_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
     .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right, "en"));
+}
+
+async function listUnsupportedInputFiles(rootDir) {
+  const entries = await fs.readdir(rootDir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((fileName) => fileName !== ".gitkeep" && !INPUT_EXTENSIONS.has(path.extname(fileName).toLowerCase()))
     .sort((left, right) => left.localeCompare(right, "en"));
 }
 
@@ -453,8 +503,10 @@ function sanitizeFileLabel(value, fallback = "photos") {
 }
 
 function buildPublicUrlListPath(outputDir, config) {
-  const prefixLabel = sanitizeFileLabel(config.prefix || "", "root");
-  return path.join(outputDir, `${prefixLabel}-public-urls.txt`);
+  const label = config.urlListLabel || config.prefix || "";
+  const prefixLabel = sanitizeFileLabel(label, "root");
+  const kind = config.urlListKind || "public";
+  return path.join(outputDir, `${prefixLabel}-${kind}-urls.txt`);
 }
 
 async function writePublicUrlList(outputDir, config, uploadedFiles) {
@@ -530,6 +582,32 @@ async function uploadFiles(config, outputDir, fileNames) {
   return uploaded;
 }
 
+async function uploadReplacementFiles(config, replacements) {
+  const client = createOssClient(config);
+  const uploaded = [];
+
+  for (const item of replacements) {
+    const result = await client.put(item.objectKey, item.outputPath, {
+      headers: {
+        "Content-Type": "image/jpeg",
+      },
+    });
+
+    uploaded.push({
+      fileName: item.fileName,
+      objectKey: item.objectKey,
+      publicUrl: item.publicUrl || buildPublicUrl(config.publicDomain, item.objectKey),
+      url: result.url || client.signatureUrl(item.objectKey, { expires: 60 }),
+    });
+    console.log(`replaced ${item.fileName} -> oss://${config.bucket}/${item.objectKey}`);
+    if (uploaded[uploaded.length - 1].publicUrl) {
+      console.log(`public ${uploaded[uploaded.length - 1].publicUrl}`);
+    }
+  }
+
+  return uploaded;
+}
+
 function assertUniqueOutputNames(plan) {
   const seen = new Map();
   const collisions = [];
@@ -547,6 +625,33 @@ function assertUniqueOutputNames(plan) {
 
   if (collisions.length > 0) {
     throw new Error(`Duplicate output names would be created:\n${collisions.join("\n")}`);
+  }
+}
+
+function assertUniqueReplacementUrls(replacementUrls) {
+  const seen = new Map();
+  const duplicates = [];
+
+  for (const item of replacementUrls) {
+    const key = item.objectKey.toLowerCase();
+    const existing = seen.get(key);
+    if (existing) {
+      duplicates.push(`${existing.url} and ${item.url}`);
+      continue;
+    }
+
+    seen.set(key, item);
+  }
+
+  if (duplicates.length > 0) {
+    throw new Error(`Duplicate replacement URLs were found:\n${duplicates.join("\n")}`);
+  }
+}
+
+function assertNoUnmatchedInputs(inputFiles, matchedInputFiles) {
+  const unmatched = inputFiles.filter((fileName) => !matchedInputFiles.has(fileName));
+  if (unmatched.length > 0) {
+    throw new Error(`Input file(s) do not match any replacement URL:\n${unmatched.join("\n")}`);
   }
 }
 
@@ -604,16 +709,118 @@ async function buildPlan(inputDir, outputDir, suffix, uploadOnly) {
   return plan;
 }
 
+async function buildReplacementPlan(inputDir, outputDir, suffix, replaceFromPath) {
+  const replacementUrls = await readReplacementUrls(replaceFromPath);
+  if (replacementUrls.length === 0) {
+    throw new Error(`No replacement URLs found in ${replaceFromPath}.`);
+  }
+  assertUniqueReplacementUrls(replacementUrls);
+
+  const unsupportedInputFiles = await listUnsupportedInputFiles(inputDir);
+  if (unsupportedInputFiles.length > 0) {
+    throw new Error(`Unsupported input file(s) found in replacement mode:\n${unsupportedInputFiles.join("\n")}`);
+  }
+
+  const inputFiles = await listInputFiles(inputDir);
+  if (inputFiles.length === 0) {
+    throw new Error(`No .HEIC, .HEIF, .JPG, or .JPEG files were found in ${inputDir}.`);
+  }
+
+  const inputByOutputName = new Map();
+  const duplicateInputNames = [];
+  for (const fileName of inputFiles) {
+    const outputName = formatOutputName(fileName, suffix);
+    const existing = inputByOutputName.get(outputName.toLowerCase());
+    if (existing) {
+      duplicateInputNames.push(`${existing} and ${fileName} -> ${outputName}`);
+      continue;
+    }
+
+    inputByOutputName.set(outputName.toLowerCase(), fileName);
+  }
+
+  if (duplicateInputNames.length > 0) {
+    throw new Error(`Duplicate input output names would be created:\n${duplicateInputNames.join("\n")}`);
+  }
+
+  const matchedInputFiles = new Set();
+  const missing = [];
+  const plan = replacementUrls.map((target) => {
+    const sourceFileName = inputByOutputName.get(target.fileName.toLowerCase());
+    if (!sourceFileName) {
+      missing.push(`${target.url} expects ${target.fileName}`);
+      return null;
+    }
+
+    matchedInputFiles.add(sourceFileName);
+    return {
+      fileName: target.fileName,
+      inputKind: getInputKind(sourceFileName),
+      objectKey: target.objectKey,
+      outputPath: path.join(outputDir, target.fileName),
+      publicUrl: target.publicUrl,
+      sourcePath: path.join(inputDir, sourceFileName),
+      sourceFileName,
+    };
+  });
+
+  if (missing.length > 0) {
+    throw new Error(`Replacement URL(s) cannot be matched to input files:\n${missing.join("\n")}`);
+  }
+
+  assertNoUnmatchedInputs(inputFiles, matchedInputFiles);
+  return plan;
+}
+
+async function processPlanItem(item, options) {
+  const sourceMeta = await readMetadata(item.sourcePath);
+  let action = "created";
+  let orientationNormalized = false;
+
+  if (item.inputKind === "copy") {
+    await copyJpegFile(item.sourcePath, item.outputPath);
+    action = "copied";
+  } else {
+    await convertFile(item.sourcePath, item.outputPath, options.quality);
+    await copyMetadata(item.sourcePath, item.outputPath);
+    orientationNormalized = await maybeNormalizeOrientation(sourceMeta, item.outputPath);
+  }
+  if (options.stripGps) {
+    await stripGpsMetadata(item.outputPath);
+  }
+  const outputMeta = await readMetadata(item.outputPath);
+  console.log(
+    `${action} ${item.fileName} (${outputMeta.ImageWidth}x${outputMeta.ImageHeight}, orientation=${outputMeta.Orientation || 1}${orientationNormalized ? ", normalized" : ""})`
+  );
+}
+
+async function processPlan(plan, options, outputDir, allowOverwrite) {
+  if (!allowOverwrite) {
+    await assertOutputTargetsAvailable(plan);
+  }
+  await fs.mkdir(outputDir, { recursive: true });
+
+  for (const item of plan) {
+    await processPlanItem(item, options);
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const rootDir = process.cwd();
   const inputDir = path.resolve(rootDir, options.inputDir);
   const outputDir = path.resolve(rootDir, options.outputDir);
-  const plan = await buildPlan(inputDir, outputDir, options.suffix, options.uploadOnly);
+  const replacementMode = Boolean(options.replaceFrom);
+  const replaceFromPath = replacementMode ? path.resolve(rootDir, options.replaceFrom) : "";
+  const plan = replacementMode
+    ? await buildReplacementPlan(inputDir, outputDir, options.suffix, replaceFromPath)
+    : await buildPlan(inputDir, outputDir, options.suffix, options.uploadOnly);
 
   console.log(`quality=${options.quality}, suffix=${options.suffix}, inputDir=${inputDir}, outputDir=${outputDir}`);
   for (const item of plan) {
-    if (item.sourceFileName) {
+    if (replacementMode) {
+      console.log(`${item.sourceFileName} -> ${item.objectKey}`);
+    } else if (item.sourceFileName) {
       console.log(`${item.sourceFileName} -> ${item.fileName}`);
     } else {
       console.log(`ready to upload ${item.fileName}`);
@@ -625,30 +832,7 @@ async function main() {
   }
 
   if (!options.uploadOnly) {
-    await assertOutputTargetsAvailable(plan);
-    await fs.mkdir(outputDir, { recursive: true });
-
-    for (const item of plan) {
-      const sourceMeta = await readMetadata(item.sourcePath);
-      let action = "created";
-      let orientationNormalized = false;
-
-      if (item.inputKind === "copy") {
-        await copyJpegFile(item.sourcePath, item.outputPath);
-        action = "copied";
-      } else {
-        await convertFile(item.sourcePath, item.outputPath, options.quality);
-        await copyMetadata(item.sourcePath, item.outputPath);
-        orientationNormalized = await maybeNormalizeOrientation(sourceMeta, item.outputPath);
-      }
-      if (options.stripGps) {
-        await stripGpsMetadata(item.outputPath);
-      }
-      const outputMeta = await readMetadata(item.outputPath);
-      console.log(
-        `${action} ${item.fileName} (${outputMeta.ImageWidth}x${outputMeta.ImageHeight}, orientation=${outputMeta.Orientation || 1}${orientationNormalized ? ", normalized" : ""})`
-      );
-    }
+    await processPlan(plan, options, outputDir, replacementMode);
   }
 
   const uploadConfig = await getUploadConfig();
@@ -663,13 +847,22 @@ async function main() {
     );
   }
 
-  const uploadedFiles = await uploadFiles(
-    uploadConfig,
-    outputDir,
-    plan.map((item) => item.fileName)
-  );
+  const uploadedFiles = replacementMode
+    ? await uploadReplacementFiles(uploadConfig, plan)
+    : await uploadFiles(
+        uploadConfig,
+        outputDir,
+        plan.map((item) => item.fileName)
+      );
 
-  const publicUrlListPath = await writePublicUrlList(outputDir, uploadConfig, uploadedFiles);
+  const publicUrlListConfig = replacementMode
+    ? {
+        ...uploadConfig,
+        urlListKind: "replacement",
+        urlListLabel: plan.length > 0 ? path.posix.dirname(plan[0].objectKey) : uploadConfig.prefix,
+      }
+    : uploadConfig;
+  const publicUrlListPath = await writePublicUrlList(outputDir, publicUrlListConfig, uploadedFiles);
   if (publicUrlListPath) {
     console.log(`public url list written to ${publicUrlListPath}`);
   }

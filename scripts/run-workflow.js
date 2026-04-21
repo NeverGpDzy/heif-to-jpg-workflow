@@ -184,6 +184,7 @@ async function main() {
 
   try {
     console.log("This workflow will scan the current directory for HEIC/HEIF/JPG/JPEG photos.");
+    console.log("For exact OSS object replacement from a URL list, use process-photos.js --replace-from=<file>.");
     console.log("Choose a config source first. Press Enter to load key.txt.");
 
     const configSource = await askWithDefault(
