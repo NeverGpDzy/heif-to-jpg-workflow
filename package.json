@@ -1,15 +1,16 @@
 {
   "name": "heif-to-jpg-workflow",
-  "version": "1.4.3",
+  "version": "2.0.0",
   "description": "Batch convert HEIC/HEIF photos to JPEG, preserve EXIF, strip GPS, and optionally upload to Aliyun OSS.",
   "main": "scripts/process-photos.js",
   "scripts": {
-    "check": "node --check scripts/process-photos.js && node --check scripts/run-workflow.js",
+    "check": "node --check scripts/process-photos.js && node --check scripts/run-workflow.js && node --check test/process-photos.test.js && node --check test/run-workflow.test.js",
     "dry-run:photos": "node scripts/process-photos.js --dry-run",
     "process:photos": "node scripts/process-photos.js",
+    "test:unit": "node --test",
     "workflow:photos": "node scripts/run-workflow.js",
     "upload:photos": "node scripts/process-photos.js --upload-only",
-    "test": "npm run check"
+    "test": "npm run check && npm run test:unit"
   },
   "keywords": [
     "heic",

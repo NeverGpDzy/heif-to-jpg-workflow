@@ -29,11 +29,25 @@ function normalizeYesNo(value, fallback) {
   return fallback;
 }
 
-function sanitizeValue(value) {
+function sanitizeOutputToken(value, fallback = "") {
+  return String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/[^\p{L}\p{N}_-]+/gu, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "") || fallback;
+}
+
+function normalizePathInput(value) {
+  return String(value || "").trim();
+}
+
+function normalizePrefixInput(value) {
   return String(value || "")
     .trim()
-    .replace(/[^A-Za-z0-9/_-]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/+|\/+$/g, "");
 }
 
 async function askWithDefault(rl, label, fallback) {
@@ -193,6 +207,51 @@ async function runNodeScript(scriptPath, args, extraEnv) {
   });
 }
 
+function buildProcessInvocation(options) {
+  const {
+    inputDir,
+    outputDir,
+    prefix,
+    publicDomain,
+    quality,
+    resolvedEnv,
+    stripGps,
+    suffix,
+    uploadNow,
+    usesQuality,
+  } = options;
+
+  const processArgs = [
+    `--suffix=${suffix}`,
+    `--input-dir=${inputDir}`,
+    `--output-dir=${outputDir}`,
+  ];
+
+  if (usesQuality) {
+    processArgs.unshift(`--quality=${quality}`);
+  }
+
+  if (stripGps) {
+    processArgs.push("--strip-gps");
+  }
+
+  const extraEnv = { ...resolvedEnv };
+  if (uploadNow) {
+    if (!prefix) {
+      throw new Error("OSS folder/prefix cannot be empty when upload is enabled.");
+    }
+
+    processArgs.push("--upload");
+    extraEnv.OSS_PREFIX = prefix;
+    extraEnv.OSS_PUBLIC_DOMAIN = publicDomain || "";
+  }
+
+  return {
+    extraEnv,
+    processArgs,
+  };
+}
+
 async function main() {
   const rl = createPrompt();
 
@@ -209,10 +268,12 @@ async function main() {
     const config = await resolveConfigSource(configSource);
     const resolvedEnv = { ...env, ...config.env };
 
-    const suffix = sanitizeValue(await askWithDefault(rl, "Filename suffix", DEFAULT_SUFFIX));
-    const prefix = sanitizeValue(await askWithDefault(rl, "OSS folder/prefix", resolvedEnv.OSS_PREFIX || DEFAULT_PREFIX));
-    const inputDir = sanitizeValue(await askWithDefault(rl, "Local input folder", DEFAULT_INPUT_DIR));
-    const outputDir = sanitizeValue(await askWithDefault(rl, "Local output folder", DEFAULT_OUTPUT_DIR));
+    const suffix = sanitizeOutputToken(await askWithDefault(rl, "Filename suffix", DEFAULT_SUFFIX));
+    const prefix = normalizePrefixInput(
+      await askWithDefault(rl, "OSS folder/prefix", resolvedEnv.OSS_PREFIX || DEFAULT_PREFIX)
+    );
+    const inputDir = normalizePathInput(await askWithDefault(rl, "Local input folder", DEFAULT_INPUT_DIR));
+    const outputDir = normalizePathInput(await askWithDefault(rl, "Local output folder", DEFAULT_OUTPUT_DIR));
     const usesQuality = await directoryHasConvertibleInputs(inputDir);
     const qualityText = usesQuality
       ? await askWithDefault(rl, "JPEG quality for HEIC/HEIF conversion (recommended 82-90)", DEFAULT_QUALITY)
@@ -246,42 +307,18 @@ async function main() {
     }
 
     const processScript = path.join(process.cwd(), "scripts", "process-photos.js");
-    const processArgs = [
-      `--suffix=${suffix}`,
-      `--input-dir=${inputDir}`,
-      `--output-dir=${outputDir}`,
-    ];
-
-    if (usesQuality) {
-      processArgs.unshift(`--quality=${quality}`);
-    }
-
-    if (stripGps) {
-      processArgs.push("--strip-gps");
-    }
-
-    const extraEnv = {
-      ...resolvedEnv,
-      OSS_PREFIX: "",
-      OSS_PUBLIC_DOMAIN: "",
-    };
-    if (uploadNow) {
-      if (!prefix) {
-        throw new Error("OSS folder/prefix cannot be empty when upload is enabled.");
-      }
-
-      extraEnv.OSS_PREFIX = prefix;
-      if (publicDomain) {
-        extraEnv.OSS_PUBLIC_DOMAIN = publicDomain;
-      }
-    } else {
-      extraEnv.OSS_ACCESS_KEY_ID = "";
-      extraEnv.OSS_ACCESS_KEY_SECRET = "";
-      extraEnv.OSS_BUCKET = "";
-      extraEnv.OSS_REGION = "";
-      extraEnv.OSS_ENDPOINT = "";
-      extraEnv.OSS_STS_TOKEN = "";
-    }
+    const { processArgs, extraEnv } = buildProcessInvocation({
+      inputDir,
+      outputDir,
+      prefix,
+      publicDomain,
+      quality,
+      resolvedEnv,
+      stripGps,
+      suffix,
+      uploadNow,
+      usesQuality,
+    });
 
     console.log("");
     console.log("Running conversion with:");
@@ -314,7 +351,23 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message || error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  buildProcessInvocation,
+  directoryHasConvertibleInputs,
+  loadConfigFile,
+  main,
+  mapConfigKey,
+  normalizePathInput,
+  normalizePrefixInput,
+  normalizeYesNo,
+  parseConfigLine,
+  resolveConfigSource,
+  sanitizeOutputToken,
+};

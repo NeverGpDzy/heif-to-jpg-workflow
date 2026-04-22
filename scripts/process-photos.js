@@ -33,6 +33,17 @@ const JPEG_TRANSFORMS = new Map([
 ]);
 const RIGHT_ANGLE_ORIENTATIONS = new Set([5, 6, 7, 8]);
 
+function sanitizeOutputToken(value, fallback = "") {
+  const normalized = String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/[^\p{L}\p{N}_-]+/gu, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized || fallback;
+}
+
 function getOrientationValue(value) {
   const orientation = Number(value);
   if (!Number.isInteger(orientation) || orientation < 1 || orientation > 8) {
@@ -51,6 +62,7 @@ function parseArgs(argv) {
     replaceFrom: "",
     suffix: DEFAULT_SUFFIX,
     stripGps: false,
+    upload: false,
     uploadOnly: false,
   };
 
@@ -62,6 +74,11 @@ function parseArgs(argv) {
 
     if (arg === "--upload-only") {
       options.uploadOnly = true;
+      continue;
+    }
+
+    if (arg === "--upload") {
+      options.upload = true;
       continue;
     }
 
@@ -114,16 +131,11 @@ function parseArgs(argv) {
 }
 
 function sanitizeSuffix(value) {
-  return value
-    .trim()
-    .replace(/[^A-Za-z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return sanitizeOutputToken(value);
 }
 
 function sanitizeBaseName(value) {
-  return value
-    .replace(/[^A-Za-z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "photo";
+  return sanitizeOutputToken(value, "photo");
 }
 
 function formatOutputName(inputFileName, suffix) {
@@ -147,7 +159,11 @@ function getInputKind(fileName) {
 }
 
 function normalizePrefix(prefix) {
-  return (prefix || "").trim().replace(/^\/+|\/+$/g, "");
+  return String(prefix || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/+|\/+$/g, "");
 }
 
 function normalizeRegion(region) {
@@ -552,10 +568,16 @@ function buildPublicUrl(publicDomain, objectKey) {
 
 function sanitizeFileLabel(value, fallback = "photos") {
   const normalized = String(value || "")
+    .normalize("NFKC")
     .trim()
-    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/[^\p{L}\p{N}_-]+/gu, "-")
+    .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
   return normalized || fallback;
+}
+
+function shouldUpload(options) {
+  return Boolean(options.upload || options.uploadOnly || options.replaceFrom);
 }
 
 function buildPublicUrlListPath(outputDir, config) {
@@ -865,8 +887,7 @@ async function processPlan(plan, options, outputDir, allowOverwrite) {
   }
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
+async function run(options) {
   const rootDir = process.cwd();
   const inputDir = path.resolve(rootDir, options.inputDir);
   const outputDir = path.resolve(rootDir, options.outputDir);
@@ -881,6 +902,7 @@ async function main() {
   if (usesQuality) {
     summaryParts.unshift(`quality=${options.quality}`);
   }
+  summaryParts.push(`upload=${shouldUpload(options)}`);
   console.log(summaryParts.join(", "));
   for (const item of plan) {
     if (replacementMode) {
@@ -900,10 +922,14 @@ async function main() {
     await processPlan(plan, options, outputDir, replacementMode);
   }
 
+  if (!shouldUpload(options)) {
+    console.log("OSS upload skipped. Use --upload to publish the current batch.");
+    return;
+  }
+
   const uploadConfig = await getUploadConfig();
   if (!uploadConfig.enabled) {
-    console.log(`OSS upload skipped. Missing: ${uploadConfig.missing.join(", ")}`);
-    return;
+    throw new Error(`OSS upload requested but missing: ${uploadConfig.missing.join(", ")}`);
   }
 
   if (uploadConfig.inferredFromDomain) {
@@ -933,7 +959,29 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exitCode = 1;
-});
+async function main(argv = process.argv.slice(2)) {
+  const options = parseArgs(argv);
+  await run(options);
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message || error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  buildPlan,
+  buildReplacementPlan,
+  formatOutputName,
+  main,
+  normalizePrefix,
+  parseArgs,
+  run,
+  sanitizeBaseName,
+  sanitizeFileLabel,
+  sanitizeOutputToken,
+  sanitizeSuffix,
+  shouldUpload,
+};
