@@ -2,12 +2,14 @@
 
 [English](./README.md)
 
-批量将 HEIC/HEIF 照片转换为 JPEG，保留 EXIF 元数据，可选移除 GPS 位置信息，并可选将生成后的文件上传到阿里云 OSS。
+批量将 HEIC/HEIF 照片转换为 JPEG，并将同批次的 JPG/JPEG 一起处理；默认保留 EXIF 元数据，可选移除 GPS 位置信息，并可选将生成后的文件上传到阿里云 OSS。
 
 这个项目主要用于本地照片批处理：
 
-- 从 `input/` 读取源 `.heic` / `.heif` 文件
+- 从 `input/` 读取源 `.heic` / `.heif` / `.jpg` / `.jpeg` 文件
 - 将处理后的 `.jpg` 文件写入 `output/`
+- 对 `Orientation=1` 的 JPG/JPEG 直接复制，不重新编码
+- 对 EXIF 方向不为 `1` 的 JPG/JPEG 使用 `jpegtran` 做无损归一化，不套用所选 JPEG 质量
 - 默认保留 EXIF 元数据
 - 转换后自动规范常见的旋转元数据
 - 发布前可选移除 GPS 元数据
@@ -19,6 +21,7 @@
 - Node.js 18 或更高版本
 - npm
 - Windows、macOS 或 Linux，并且系统需支持随项目安装的 `exiftool-vendored`
+- 如果需要归一化 EXIF `Orientation` 不为 `1` 的 JPG/JPEG，系统 `PATH` 中还需要可用的 `jpegtran`
 
 ## 安装
 
@@ -47,6 +50,8 @@ npm run dry-run:photos
 ```bash
 node scripts/process-photos.js --quality=90 --suffix=converted --input-dir=input --output-dir=output --strip-gps
 ```
+
+如果源 JPG/JPEG 的 EXIF `Orientation` 不为 `1`，工作流会通过 `jpegtran` 做无损旋转或翻转，再把输出写回为 `Orientation=1`。`--quality` 仅作用于 HEIC/HEIF 转 JPEG，不作用于 JPG/JPEG 输入。
 
 只上传 `output/` 中已经存在的 JPG 文件：
 

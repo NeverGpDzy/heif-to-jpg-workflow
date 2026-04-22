@@ -10,7 +10,6 @@ const { promisify } = require("node:util");
 const OSS = require("ali-oss");
 const convert = require("heic-convert");
 const { exiftoolPath } = require("exiftool-vendored");
-const sharp = require("sharp");
 const urllib = require("urllib");
 
 const execFileAsync = promisify(execFile);
@@ -19,9 +18,19 @@ const DEFAULT_SUFFIX = "converted";
 const DEFAULT_INPUT_DIR = "input";
 const DEFAULT_OUTPUT_DIR = "output";
 const DEFAULT_QUALITY = 90;
+const JPEGTRAN_BIN = process.env.JPEGTRAN_BIN || "jpegtran";
 const CONVERTIBLE_EXTENSIONS = new Set([".heic", ".heif"]);
 const PASSTHROUGH_EXTENSIONS = new Set([".jpg", ".jpeg"]);
 const INPUT_EXTENSIONS = new Set([...CONVERTIBLE_EXTENSIONS, ...PASSTHROUGH_EXTENSIONS]);
+const JPEG_TRANSFORMS = new Map([
+  [2, ["-flip", "horizontal"]],
+  [3, ["-rotate", "180"]],
+  [4, ["-flip", "vertical"]],
+  [5, ["-transpose"]],
+  [6, ["-rotate", "90"]],
+  [7, ["-transverse"]],
+  [8, ["-rotate", "270"]],
+]);
 const RIGHT_ANGLE_ORIENTATIONS = new Set([5, 6, 7, 8]);
 
 function getOrientationValue(value) {
@@ -445,23 +454,38 @@ async function copyJpegFile(sourcePath, outputPath) {
   await fs.copyFile(sourcePath, outputPath);
 }
 
-async function normalizeJpegFile(sourcePath, outputPath, quality) {
-  await sharp(sourcePath)
-    .jpeg({
-      chromaSubsampling: "4:4:4",
-      quality,
-    })
-    .toFile(outputPath);
+async function normalizeJpegFile(sourcePath, outputPath, sourceMeta) {
+  const sourceOrientation = getOrientationValue(sourceMeta.Orientation);
+  const transform = JPEG_TRANSFORMS.get(sourceOrientation);
+  if (!transform) {
+    throw new Error(`Unsupported JPG/JPEG orientation for normalization: ${sourceOrientation}`);
+  }
+
+  try {
+    await execFileAsync(
+      JPEGTRAN_BIN,
+      ["-copy", "none", ...transform, "-outfile", outputPath, sourcePath],
+      { windowsHide: true }
+    );
+  } catch (error) {
+    if (error && (error.code === "ENOENT" || error.code === "EPERM")) {
+      throw new Error(
+        `jpegtran is required to normalize JPG/JPEG inputs with EXIF orientation other than 1 without JPEG quality re-encoding. Ensure ${JPEGTRAN_BIN} is installed, executable, and available on PATH or set JPEGTRAN_BIN to its absolute path.`
+      );
+    }
+
+    throw error;
+  }
 }
 
-async function copyOrNormalizeJpegFile(sourcePath, outputPath, quality, sourceMeta) {
+async function copyOrNormalizeJpegFile(sourcePath, outputPath, sourceMeta) {
   const sourceOrientation = getOrientationValue(sourceMeta.Orientation);
   if (sourceOrientation === 1) {
     await copyJpegFile(sourcePath, outputPath);
     return false;
   }
 
-  await normalizeJpegFile(sourcePath, outputPath, quality);
+  await normalizeJpegFile(sourcePath, outputPath, sourceMeta);
   await copyMetadata(sourcePath, outputPath);
   await setOrientation(outputPath, 1);
   return true;
@@ -813,7 +837,6 @@ async function processPlanItem(item, options) {
     orientationNormalized = await copyOrNormalizeJpegFile(
       item.sourcePath,
       item.outputPath,
-      options.quality,
       sourceMeta
     );
     action = orientationNormalized ? "normalized" : "copied";
