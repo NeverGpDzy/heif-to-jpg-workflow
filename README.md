@@ -11,6 +11,7 @@ This project is designed for local photo batches:
 - copy existing JPG/JPEG inputs without re-encoding when they already use `Orientation=1`
 - losslessly normalize EXIF-oriented JPG/JPEG inputs with `jpegtran` without applying the selected JPEG quality
 - keep EXIF metadata by default
+- keep GPS metadata by default unless `--strip-gps` is used
 - normalize HEIC/HEIF conversion rotation metadata and rewrite EXIF-oriented JPEGs so output files display correctly without browser auto-rotation
 - optionally strip GPS metadata before publishing
 - optionally upload converted files to Aliyun OSS
@@ -81,12 +82,12 @@ When a source JPG/JPEG depends on EXIF orientation (`Orientation` other than `1`
 `npm run workflow:photos` asks for:
 
 - config source or config file path, default `key.txt`
-- JPEG quality, default `90`
 - output filename suffix, default `converted`
 - OSS folder/prefix, default `photos`
 - local input folder, default `input`
 - local output folder, default `output`
-- whether GPS metadata should be removed, default `yes`
+- JPEG quality for HEIC/HEIF conversion, default `90`
+- whether GPS metadata should be removed, default `no`
 - whether files should be uploaded immediately
 - public domain used to print final URLs
 
@@ -142,7 +143,7 @@ If `bucket` or `region` is omitted but `publicDomain` points to an Aliyun OSS CN
 - default JPEG quality: `90`
 - default suffix: `converted`
 - default OSS prefix: `photos`
-- GPS removal default in interactive mode: `yes`
+- GPS removal default in interactive mode: `no`
 
 ## Output Names
 
@@ -162,7 +163,7 @@ Other filenames are sanitized and get the configured suffix. If multiple inputs 
 
 ## Privacy Notes
 
-EXIF metadata can contain sensitive details such as device model, timestamps, and GPS coordinates. Use `--strip-gps` or answer `yes` to the interactive GPS removal prompt before publishing public website images.
+EXIF metadata can contain sensitive details such as device model, timestamps, and GPS coordinates. GPS is preserved by default. Use `--strip-gps` or answer `yes` to the interactive GPS removal prompt before publishing public website images.
 
 ## Development
 

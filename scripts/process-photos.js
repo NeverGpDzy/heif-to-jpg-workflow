@@ -875,8 +875,13 @@ async function main() {
   const plan = replacementMode
     ? await buildReplacementPlan(inputDir, outputDir, options.suffix, replaceFromPath)
     : await buildPlan(inputDir, outputDir, options.suffix, options.uploadOnly);
+  const usesQuality = plan.some((item) => item.inputKind === "convert");
 
-  console.log(`quality=${options.quality}, suffix=${options.suffix}, inputDir=${inputDir}, outputDir=${outputDir}`);
+  const summaryParts = [`suffix=${options.suffix}`, `inputDir=${inputDir}`, `outputDir=${outputDir}`];
+  if (usesQuality) {
+    summaryParts.unshift(`quality=${options.quality}`);
+  }
+  console.log(summaryParts.join(", "));
   for (const item of plan) {
     if (replacementMode) {
       console.log(`${item.sourceFileName} -> ${item.objectKey}`);

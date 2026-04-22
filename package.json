@@ -1,6 +1,6 @@
 {
   "name": "heif-to-jpg-workflow",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Batch convert HEIC/HEIF photos to JPEG, preserve EXIF, strip GPS, and optionally upload to Aliyun OSS.",
   "main": "scripts/process-photos.js",
   "scripts": {

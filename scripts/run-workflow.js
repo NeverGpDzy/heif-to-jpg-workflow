@@ -12,6 +12,7 @@ const DEFAULT_SUFFIX = "converted";
 const DEFAULT_PREFIX = "photos";
 const DEFAULT_INPUT_DIR = "input";
 const DEFAULT_OUTPUT_DIR = "output";
+const CONVERTIBLE_EXTENSIONS = new Set([".heic", ".heif"]);
 
 function createPrompt() {
   return readline.createInterface({
@@ -132,6 +133,19 @@ async function loadConfigFile(configPath, options = {}) {
   };
 }
 
+async function directoryHasConvertibleInputs(inputDir) {
+  const resolvedPath = path.resolve(process.cwd(), inputDir);
+
+  try {
+    const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+    return entries.some(
+      (entry) => entry.isFile() && CONVERTIBLE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())
+    );
+  } catch (error) {
+    return true;
+  }
+}
+
 async function resolveConfigSource(selection) {
   const trimmed = String(selection || "").trim();
   const normalized = trimmed.toLowerCase();
@@ -195,12 +209,15 @@ async function main() {
     const config = await resolveConfigSource(configSource);
     const resolvedEnv = { ...env, ...config.env };
 
-    const qualityText = await askWithDefault(rl, "JPEG quality (recommended 82-90)", DEFAULT_QUALITY);
     const suffix = sanitizeValue(await askWithDefault(rl, "Filename suffix", DEFAULT_SUFFIX));
     const prefix = sanitizeValue(await askWithDefault(rl, "OSS folder/prefix", resolvedEnv.OSS_PREFIX || DEFAULT_PREFIX));
     const inputDir = sanitizeValue(await askWithDefault(rl, "Local input folder", DEFAULT_INPUT_DIR));
     const outputDir = sanitizeValue(await askWithDefault(rl, "Local output folder", DEFAULT_OUTPUT_DIR));
-    const stripGps = normalizeYesNo(await askWithDefault(rl, "Remove GPS metadata from output? (y/n)", "y"), true);
+    const usesQuality = await directoryHasConvertibleInputs(inputDir);
+    const qualityText = usesQuality
+      ? await askWithDefault(rl, "JPEG quality for HEIC/HEIF conversion (recommended 82-90)", DEFAULT_QUALITY)
+      : DEFAULT_QUALITY;
+    const stripGps = normalizeYesNo(await askWithDefault(rl, "Remove GPS metadata from output? (y/n)", "n"), false);
     const uploadDefault = resolvedEnv.OSS_ACCESS_KEY_ID && resolvedEnv.OSS_ACCESS_KEY_SECRET ? "y" : "n";
     const uploadNow = normalizeYesNo(await askWithDefault(rl, "Upload to OSS now? (y/n)", uploadDefault), uploadDefault === "y");
     const publicDomain = uploadNow
@@ -230,11 +247,14 @@ async function main() {
 
     const processScript = path.join(process.cwd(), "scripts", "process-photos.js");
     const processArgs = [
-      `--quality=${quality}`,
       `--suffix=${suffix}`,
       `--input-dir=${inputDir}`,
       `--output-dir=${outputDir}`,
     ];
+
+    if (usesQuality) {
+      processArgs.unshift(`--quality=${quality}`);
+    }
 
     if (stripGps) {
       processArgs.push("--strip-gps");
@@ -266,7 +286,9 @@ async function main() {
     console.log("");
     console.log("Running conversion with:");
     console.log(`- config=${config.label}`);
-    console.log(`- quality=${quality}`);
+    if (usesQuality) {
+      console.log(`- quality=${quality}`);
+    }
     console.log(`- suffix=${suffix}`);
     console.log(`- inputDir=${inputDir}`);
     console.log(`- outputDir=${outputDir}`);

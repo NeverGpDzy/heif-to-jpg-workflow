@@ -11,6 +11,7 @@
 - 对 `Orientation=1` 的 JPG/JPEG 直接复制，不重新编码
 - 对 EXIF 方向不为 `1` 的 JPG/JPEG 使用 `jpegtran` 做无损归一化，不套用所选 JPEG 质量
 - 默认保留 EXIF 元数据
+- 默认保留 GPS 元数据，除非显式使用 `--strip-gps`
 - 转换后自动规范常见的旋转元数据
 - 发布前可选移除 GPS 元数据
 - 可选将转换后的图片上传到阿里云 OSS
@@ -64,12 +65,12 @@ npm run upload:photos
 `npm run workflow:photos` 会依次询问：
 
 - 配置来源或配置文件路径，默认 `key.txt`
-- JPEG 质量，默认 `90`
 - 输出文件名后缀，默认 `converted`
 - OSS 目录/前缀，默认 `photos`
 - 本地输入目录，默认 `input`
 - 本地输出目录，默认 `output`
-- 是否移除 GPS 元数据，默认 `yes`
+- HEIC/HEIF 转 JPEG 的质量，默认 `90`
+- 是否移除 GPS 元数据，默认 `no`
 - 是否立即上传文件
 - 用于输出最终 URL 的公网域名
 
@@ -120,7 +121,7 @@ prefix photos
 - 默认 JPEG 质量：`90`
 - 默认后缀：`converted`
 - 默认 OSS 前缀：`photos`
-- 交互模式下默认移除 GPS：`yes`
+- 交互模式下默认移除 GPS：`no`
 
 ## 输出文件名
 
@@ -134,7 +135,7 @@ IMG_1234_converted.jpg
 
 ## 隐私说明
 
-EXIF 元数据可能包含设备型号、拍摄时间、GPS 坐标等敏感信息。若图片会用于公开网站，建议使用 `--strip-gps`，或在交互式流程中对移除 GPS 的问题回答 `yes`。
+EXIF 元数据可能包含设备型号、拍摄时间、GPS 坐标等敏感信息。默认会保留 GPS。若图片会用于公开网站，建议使用 `--strip-gps`，或在交互式流程中对移除 GPS 的问题回答 `yes`。
 
 ## 开发
 
